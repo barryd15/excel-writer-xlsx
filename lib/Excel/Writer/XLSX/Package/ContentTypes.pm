@@ -237,6 +237,35 @@ sub _add_calc_chain {
 
 ###############################################################################
 #
+# _add_comments()
+#
+# Add the comments link to the ContentTypes overrides.
+#
+sub _add_comments {
+
+    my $self = shift;
+    my $file = shift;
+    
+    $self->_add_override( $file,
+        $app_document . 'spreadsheetml.comments+xml' );
+}
+
+
+###############################################################################
+#
+# _add_vmlDrawing()
+#
+# Add a default for vml.
+#
+sub _add_vmlDrawing {
+
+    my $self = shift;
+    $self->_add_default( 'vml', 'application/vnd.openxmlformats-officedocument.vmlDrawing');
+}
+
+
+###############################################################################
+#
 # _add_image_types()
 #
 # Add the image default types.

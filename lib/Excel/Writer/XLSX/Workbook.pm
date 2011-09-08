@@ -786,6 +786,9 @@ sub _store_workbook {
 
     # Prepare the drawings, charts and images.
     $self->_prepare_drawings();
+    
+    # prepare comments
+    $self->_prepare_comments();
 
     # Add cached data to charts.
     $self->_add_chart_data();
@@ -1275,6 +1278,46 @@ sub _prepare_drawings {
     }
 
     $self->{_drawing_count} = $drawing_id;
+}
+
+
+###############################################################################
+#
+# _prepare_comments()
+#
+# Iterate through the worksheets and set up any comments.
+#
+sub _prepare_comments {
+    
+    my $self          = shift;
+    my $vmlDrawing_id = 0;
+    my $comment_id    = 0;  # track sheets with comments in the workbook
+
+    for my $sheet ( @{ $self->{_worksheets} } ) {
+        next unless ( keys %{$sheet->{_comment}} );
+        
+        # the vmlDrawing id and comment id will presently increment together,
+        # but we still store them separately for clarity
+        # if these are defined, it indicates the corresponding file exists for the sheet
+        $sheet->{_comment_id} = ++$comment_id;
+        $sheet->{_vmlDrawing_id} = ++$vmlDrawing_id;
+        
+        # it was weird (and confusing) doing per-worksheet stuff in a routine called once per comment (or once per chart/image)
+        # so I just do the per-worksheet stuff here
+        # perhaps later we will fix it to use a sheet method, but not a per-comment sheet method
+        push @{$sheet->{_external_clinks}}, [ '/comments', "../comments$comment_id.xml" ];
+        push @{$sheet->{_external_vlinks}}, [ '/vmlDrawing', "../drawings/vmlDrawing$vmlDrawing_id.vml" ];
+        
+        for my $row (sort { $a <=> $b } keys %{$sheet->{_comment}}) {
+            for my $col (sort { $a <=> $b } keys %{$sheet->{_comment}{$row}}) {
+                my $commentDetails = $sheet->{_comment}{$row}{$col};
+                $sheet->_prepare_comment( $row, $col, $commentDetails );
+            }
+        }
+    }
+    
+    $self->{_vmlDrawing_count} = $vmlDrawing_id;
+    $self->{_comment_count} = $comment_id;
 }
 
 

@@ -161,11 +161,18 @@ sub new {
     $self->{_hlink_refs}      = [];
     $self->{_external_hlinks} = [];
     $self->{_external_dlinks} = [];
+    $self->{_external_clinks} = [];
+    $self->{_external_vlinks} = [];
     $self->{_drawing_links}   = [];
     $self->{_charts}          = [];
     $self->{_images}          = [];
     $self->{_drawing}         = 0;
-
+    $self->{_comment_list}    = [];
+    
+    # instead of creating a class for these files, we just store an id here
+    $self->{_comment_id} = undef;
+    $self->{_vmlDrawing_id} = undef;
+    
     $self->{_rstring} = '';
 
     $self->{_validations} = [];
@@ -1893,6 +1900,9 @@ sub write_comment {
     my $max_len = 30831;             # Maintain same max as binary file.
     my $type    = 99;
 
+    # Check for pairs of optional arguments, i.e. an odd number of args.
+    croak "Uneven number of additional arguments" unless @_ % 2;
+
     # Check that row and col are valid and store max and min values
     return -2 if $self->_check_dimensions( $row, $col );
 
@@ -1903,10 +1913,6 @@ sub write_comment {
     }
 
 
-    # Check that row and col are valid and store max and min values
-    return -2 if $self->_check_dimensions( $row, $col );
-
-
     # Add a datatype to the cell if it doesn't already contain one.
     # This prevents an empty cell with a comment from being ignored.
     #
@@ -1914,10 +1920,141 @@ sub write_comment {
         $self->{_table}->[$row]->[$col] = [$type];
     }
 
-    # Store the comment.
-    $self->{_comment}->{$row}->{$col} = $comment;
+    # Store the comment details.
+    $self->{_comment}->{$row}->{$col} = [ $self->_comment_params(@_) ];
 
     return $error;
+}
+
+
+###############################################################################
+#
+# _comment_params()
+#
+# This method handles the additional optional parameters to write_comment() as
+# well as calculating the comment object position and vertices.
+#
+sub _comment_params {
+
+    my $self            = shift;
+
+    my $row             = shift;
+    my $col             = shift;
+    my $string          = shift;
+
+    my $default_width   = 128;
+    my $default_height  = 74;
+
+    my %params  = (
+                    author          => '',
+                    color           => undef,
+                    start_cell      => undef,
+                    start_col       => undef,
+                    start_row       => undef,
+                    visible         => undef,
+                    width           => $default_width,
+                    height          => $default_height,
+                    x_offset        => undef,
+                    x_scale         => 1,
+                    y_offset        => undef,
+                    y_scale         => 1,
+                  );
+
+
+    # Overwrite the defaults with any user supplied values. Incorrect or
+    # misspelled parameters are silently ignored.
+    %params     = (%params, @_);
+
+
+    # Ensure that a width and height have been set.
+    $params{width}  = $default_width  if not $params{width};
+    $params{height} = $default_height if not $params{height};
+
+
+    # Set the comment background colour.
+    my $color       = $params{color};
+       $color       = &Excel::Writer::XLSX::Format::_get_color($color);
+    $params{color}  = $color;
+
+
+    # Convert a cell reference to a row and column.
+    if (defined $params{start_cell}) {
+        my ($row, $col)    = $self->_substitute_cellref($params{start_cell});
+        $params{start_row} = $row;
+        $params{start_col} = $col;
+    }
+
+
+    # Set the default start cell and offsets for the comment. These are
+    # generally fixed in relation to the parent cell. However there are
+    # some edge cases for cells at the, er, edges.
+    #
+    my $maxRow = 1_048_575;
+    my $maxCol = 16383;
+    
+    if (not defined $params{start_row}) {
+
+        if    ($row == 0          ) {$params{start_row} = 0           }
+        elsif ($row == ($maxRow-2)) {$params{start_row} = $maxRow - 6 }
+        elsif ($row == ($maxRow-1)) {$params{start_row} = $maxRow - 5 }
+        elsif ($row == ($maxRow-0)) {$params{start_row} = $maxRow - 4 }
+        else                        {$params{start_row} = $row - 1    }
+    }
+
+    if (not defined $params{y_offset}) {
+
+        if    ($row == 0          ) {$params{y_offset} = 2 }
+        elsif ($row == ($maxRow-2)) {$params{y_offset} = 4 }
+        elsif ($row == ($maxRow-1)) {$params{y_offset} = 4 }
+        elsif ($row == ($maxRow-0)) {$params{y_offset} = 2 }
+        else                        {$params{y_offset} = 7 }
+    }
+
+    if (not defined $params{start_col}) {
+
+        if    ($col == ($maxCol-2) ) {$params{start_col} = $maxCol - 5 }
+        elsif ($col == ($maxCol-1) ) {$params{start_col} = $maxCol - 4 }
+        elsif ($col == ($maxCol-0) ) {$params{start_col} = $maxCol - 3 }
+        else                         {$params{start_col} = $col + 1    }
+    }
+
+    if (not defined $params{x_offset}) {
+
+        if    ($col == ($maxCol-2) ) {$params{x_offset} = 49 }
+        elsif ($col == ($maxCol-1) ) {$params{x_offset} = 49 }
+        elsif ($col == ($maxCol-0) ) {$params{x_offset} = 49 }
+        else                         {$params{x_offset} = 15 }
+    }
+
+
+    # Scale the size of the comment box if required.
+    if ($params{x_scale}) {
+        $params{width}  = $params{width}  * $params{x_scale};
+    }
+
+    if ($params{y_scale}) {
+        $params{height} = $params{height} * $params{y_scale};
+    }
+
+
+    # Calculate the positions of comment object.
+    my @vertices = $self->_position_object( $params{start_col},
+                                            $params{start_row},
+                                            $params{x_offset},
+                                            $params{y_offset},
+                                            $params{width},
+                                            $params{height},
+                                          );
+
+    return(
+           $row,
+           $col,
+           $string,
+           $params{author},
+           $params{visible},
+           $params{color},
+           [@vertices]
+          );
 }
 
 
@@ -3447,6 +3584,22 @@ sub _position_object {
     $y2 = $height;
 
 
+    return (
+        $col_start, $row_start, $x1, $y1,
+        $col_end,   $row_end,   $x2, $y2,
+        $x_abs,     $y_abs
+
+    );
+}
+
+sub _position_object_emus {
+    my $self = shift;
+    my (
+        $col_start, $row_start, $x1, $y1,
+        $col_end,   $row_end,   $x2, $y2,
+        $x_abs,     $y_abs
+    ) = $self->_position_object(@_);
+    
     # Convert the pixel values to EMUs. See above.
     $x1    *= 9_525;
     $y1    *= 9_525;
@@ -3715,7 +3868,7 @@ sub _prepare_chart {
     my $height = int( 0.5 + ( 288 * $scale_y ) );
 
     my @dimensions =
-      $self->_position_object( $col, $row, $x_offset, $y_offset, $width,
+      $self->_position_object_emus( $col, $row, $x_offset, $y_offset, $width,
         $height );
 
     # Create a Drawing object to use with worksheet unless one already exists.
@@ -3738,6 +3891,23 @@ sub _prepare_chart {
 
     push @{ $self->{_drawing_links} },
       [ '/chart', '../charts/chart' . $chart_id . '.xml' ];
+}
+
+###############################################################################
+#
+# _prepare_comment()
+#
+# Set up comment data.
+#
+sub _prepare_comment {
+
+    my $self           = shift;
+    my $row            = shift;
+    my $col            = shift;
+    my $commentDetails = shift;
+    
+    # $commentDetails already includes $row and $col
+    push @{ $self->{_comment_list} }, $commentDetails;
 }
 
 
@@ -3876,7 +4046,7 @@ sub _prepare_image {
     $height *= $scale_y;
 
     my @dimensions =
-      $self->_position_object( $col, $row, $x_offset, $y_offset, $width,
+      $self->_position_object_emus( $col, $row, $x_offset, $y_offset, $width,
         $height );
 
     # Convert from pixels to emus.
@@ -4019,6 +4189,152 @@ sub repeat_formula {
 # XML writing methods.
 #
 ###############################################################################
+
+
+
+sub _write_comments_file {
+    my $self = shift;
+    my $dir  = shift;
+    
+    if (defined($self->{_comment_id})) {
+        my $out = IO::File->new("$dir/xl/comments$self->{_comment_id}.xml", 'w') or die "Failed to open comments file: $!";
+        
+        $out->print(qq(<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <authors>
+        ));
+        
+        my @authors = ();
+        my %authors = ();
+        for my $commentRec (@{$self->{_comment_list}}) {
+            my ($row, $col, $commentText, $author, $visible, $color, $vertices) = @$commentRec;
+            if (!exists($authors{$author})) {
+                $authors{$author} = @authors;
+                push @authors, $author;
+                
+                $out->print(_literalDataElement('author', $author));
+            }
+        }
+        
+        $out->print(qq(
+              </authors>
+              <commentList>
+        ));
+        
+        for my $commentRec (@{$self->{_comment_list}}) {
+            my ($row, $col, $commentText, $author, $visible, $color, $vertices) = @$commentRec;
+            
+            my $cellRef = xl_rowcol_to_cell($row, $col);
+            my $commentTag = _literalDataElement('t', $commentText);
+            my $authorId = $authors{$author};
+            
+            $out->print(qq(
+                <comment ref="$cellRef" authorId="$authorId">
+                  <text>
+                    <r>
+                      <rPr>
+                        <sz val="8"/>
+                        <rFont val="Tahoma"/>
+                      </rPr>
+                      $commentTag
+                    </r>
+                  </text>
+                </comment>
+            ));
+        }
+        
+        $out->print(qq(
+              </commentList>
+            </comments>
+        ));
+        
+        $out->close();
+    }
+}
+
+sub _literalDataElement {
+    my ($tag, $data, @attributes) = @_;
+    
+    length($data) or @attributes or return "<$tag/>";
+    
+    my $xml = '';
+    open my $xml_fh, '>', \$xml or die "Failed to open filehandle: $!";
+    my $writer = Excel::Writer::XLSX::Package::XMLwriterSimple->new( $xml_fh );
+    
+    if ( $data =~ /^\s/ || $data =~ /\s$/ ) {
+        push @attributes, ( 'xml:space' => 'preserve' );
+    }
+    
+    $writer->dataElement($tag, $data, @attributes);
+    
+    return $xml;
+}
+
+sub _write_vmlDrawing_file {
+    my $self = shift;
+    my $dir  = shift;
+    
+    if (defined($self->{_vmlDrawing_id})) {
+        my $out = IO::File->new("$dir/xl/drawings/vmlDrawing$self->{_vmlDrawing_id}.vml", 'w') or die "Failed to open vml file: $!";
+        
+        $out->print(qq(<?xml version="1.0"?>
+            <xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+              <o:shapelayout v:ext="edit">
+                <o:idmap v:ext="edit" data="1"/>
+              </o:shapelayout>
+              <v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe">
+                <v:stroke joinstyle="miter"/>
+                <v:path gradientshapeok="t" o:connecttype="rect"/>
+              </v:shapetype>
+        ));
+        
+        my $shapeId = 1025;
+        
+        for my $commentRec (@{$self->{_comment_list}}) {
+            my ($row, $col, $commentText, $author, $visible, $color, $vertices) = @$commentRec;
+            
+            my (
+                $startCol, $startRow, $startXOffset, $startYOffset,
+                $endCol, $endRow, $endXOffset, $endYOffset,
+                $absX, $absY
+            ) = @$vertices;
+            
+            my $colorSpec = $color ? "#" . substr($self->_get_palette_color( $color ), 2, 6) : "infoBackground [80]";
+            my $visibleSpec = $visible ? "<x:Visible/>" : '';
+            my $visibility = $visible ? "visible" : "hidden";
+            
+            $out->print(qq(
+              <v:shape id="_x0000_s$shapeId" type="#_x0000_t202" style="position:absolute;   margin-left:203.25pt;margin-top:30.75pt;width:96pt;height:55.5pt;z-index:1;   visibility:$visibility" fillcolor="$colorSpec" o:insetmode="auto">
+                <v:fill color2="infoBackground [80]"/>
+                <v:shadow on="t" color="black" obscured="t"/>
+                <v:path o:connecttype="none"/>
+                <v:textbox>
+                  <div style="text-align:left"/>
+                </v:textbox>
+                <x:ClientData ObjectType="Note">
+                  <x:MoveWithCells/>
+                  <x:SizeWithCells/>
+                  <x:Anchor>
+                    $startCol, $startXOffset, $startRow, $startYOffset, $endCol, $endXOffset, $endRow, $endYOffset</x:Anchor>
+                  <x:AutoFill>False</x:AutoFill>
+                  <x:Row>$row</x:Row>
+                  <x:Column>$col</x:Column>
+                  $visibleSpec
+                </x:ClientData>
+              </v:shape>
+            ));
+            
+            $shapeId++;
+        }
+        
+        $out->print(qq(
+            </xml>
+        ));
+        
+        $out->close();
+    }
+}
+
 
 
 ###############################################################################
@@ -5751,10 +6067,21 @@ sub _write_sheet_protection {
 sub _write_drawings {
 
     my $self = shift;
-
-    return unless $self->{_drawing};
-
-    $self->_write_drawing( $self->{_hlink_count} + 1 );
+    
+    my $id = $self->{_hlink_count} + 1;
+    
+    if ($self->{_drawing}) {
+        $self->_write_drawing( $id++ );
+    }
+    
+    if (defined($self->{_vmlDrawing_id})) {
+        $self->_write_legacyDrawing( $id++ );
+    }
+    
+    # the ref to the commentsx.xml file is apparently unused and should be skipped here
+    if (defined($self->{_comment_id})) {
+        $id++;
+    }
 }
 
 
@@ -5773,6 +6100,24 @@ sub _write_drawing {
     my @attributes = ( 'r:id' => $r_id );
 
     $self->{_writer}->emptyTag( 'drawing', @attributes );
+}
+
+
+##############################################################################
+#
+# _write_legacyDrawing()
+#
+# Write the <legacyDrawing> element.
+#
+sub _write_legacyDrawing {
+    
+    my $self = shift;
+    my $id   = shift;
+    my $r_id = 'rId' . $id;
+
+    my @attributes = ( 'r:id' => $r_id );
+
+    $self->{_writer}->emptyTag( 'legacyDrawing', @attributes );
 }
 
 

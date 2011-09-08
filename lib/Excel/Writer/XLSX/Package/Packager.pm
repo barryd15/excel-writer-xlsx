@@ -96,6 +96,8 @@ sub _add_workbook {
     $self->{_sheet_names}   = \@sheet_names;
     $self->{_chart_count}   = scalar @{ $workbook->{_charts} };
     $self->{_drawing_count} = scalar @{ $workbook->{_drawings} };
+    $self->{_vmlDrawing_count} = $workbook->{_vmlDrawing_count};
+    $self->{_comment_count} = $workbook->{_comment_count};
     $self->{_named_ranges}  = $workbook->{_named_ranges};
 
     for my $worksheet ( @{ $self->{_workbook}->{_worksheets} } ) {
@@ -123,6 +125,7 @@ sub _create_package {
     $self->_write_worksheet_files();
     $self->_write_chartsheet_files();
     $self->_write_chart_files();
+    $self->_write_comments_files();
     $self->_write_drawing_files();
     $self->_write_shared_strings_file();
     $self->_write_app_file();
@@ -233,6 +236,35 @@ sub _write_chart_files {
         $chart->_assemble_xml_file();
 
     }
+}
+
+
+###############################################################################
+#
+# _write_comments_files()
+#
+# Write the comments and vmlDrawing files.
+#
+sub _write_comments_files {
+
+    my $self = shift;
+    my $dir  = $self->{_package_dir};
+
+    return unless $self->{_comment_count};
+
+    mkdir $dir . '/xl';
+    mkdir $dir . '/xl/drawings';
+    
+    for my $sheet (@{$self->{_workbook}->{_worksheets}}) {
+        if (defined($sheet->{_comment_id}) and defined($sheet->{_vmlDrawing_id})) {
+            $sheet->_write_comments_file($dir);
+            $sheet->_write_vmlDrawing_file($dir);
+        }
+        elsif (defined($sheet->{_comment_id}) or defined($sheet->{_vmlDrawing_id})) {
+            die "sheet was assigned an odd comments or vmlDrawing file (they should always be assigned to a sheet together)";
+        }
+    }
+    
 }
 
 
@@ -399,7 +431,19 @@ sub _write_content_types_file {
     if ( $self->{_workbook}->{_str_total} ) {
         $content->_add_shared_strings();
     }
+    
+    $self->{_workbook}->{_comment_total} = 0;
+    for my $sheet (@{$self->{_workbook}->{_worksheets}}) {
+        if (defined($sheet->{_comment_id})) {
+            $content->_add_comments("/xl/comments$sheet->{_comment_id}.xml");
+        }
+        $self->{_workbook}->{_comment_total}++;
+    }
 
+    if ( $self->{_workbook}->{_comment_total} ) {
+        $content->_add_vmlDrawing();
+    }
+    
     $content->_set_xml_writer( $dir . '/[Content_Types].xml' );
     $content->_assemble_xml_file();
 }
@@ -550,8 +594,12 @@ sub _write_worksheet_rels_files {
 
         $index++;
 
-        my @external_links = (@{ $worksheet->{_external_hlinks} },
-          @{ $worksheet->{_external_dlinks} });
+        my @external_links = (
+            @{ $worksheet->{_external_hlinks} },
+            @{ $worksheet->{_external_dlinks} },
+            @{ $worksheet->{_external_vlinks} },
+            @{ $worksheet->{_external_clinks} },
+        );
 
         next unless @external_links;
 
