@@ -461,7 +461,7 @@ sub _encode_password {
 
 ###############################################################################
 #
-# set_column($firstcol, $lastcol, $width, $format, $hidden, $level)
+# set_column($firstcol, $lastcol, $width, $format, $hidden, $level, $collapsed)
 #
 # Set the width of a single column or a range of columns.
 # See also: _write_col_info
@@ -4389,6 +4389,8 @@ sub _write_col_info {
     push @attributes, ( style       => $format ) if $format;
     push @attributes, ( hidden      => 1 )       if $hidden;
     push @attributes, ( customWidth => 1 )       if $custom_width;
+    push @attributes, ( outlineLevel => $level ) if $level;
+    push @attributes, ( collapsed   => 1 )       if $collapsed;
 
 
     $self->{_writer}->emptyTag( 'col', @attributes );
@@ -4552,6 +4554,8 @@ sub _write_row {
     push @attributes, ( 'ht'           => $height ) if $height != 15;
     push @attributes, ( 'hidden'       => 1 )       if $hidden;
     push @attributes, ( 'customHeight' => 1 )       if $height != 15;
+    push @attributes, ( 'outlineLevel' => $level )  if $level;
+    push @attributes, ( 'collapsed'    => $collapsed ) if $collapsed;
 
 
     if ( $empty_row ) {
