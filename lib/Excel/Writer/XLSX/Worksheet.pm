@@ -4259,6 +4259,7 @@ sub _literalDataElement {
     
     my $xml = '';
     open my $xml_fh, '>', \$xml or die "Failed to open filehandle: $!";
+    $xml_fh->binmode(':utf8');
     my $writer = Excel::Writer::XLSX::Package::XMLwriterSimple->new( $xml_fh );
     
     if ( $data =~ /^\s/ || $data =~ /\s$/ ) {
